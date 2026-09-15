@@ -32,19 +32,18 @@ Guidance for Claude Code (and other agents) working in this repository.
 
 **The site is a portal for a growing collection of small web tools and learning artifacts**, all living inside the single `index.html` per the hard constraints above. Since there are no separate pages, "browsing" and "using a tool" are just different views inside one page, switched by JS and tracked via `location.hash` so views stay linkable/bookmarkable.
 
-### Phase 0 — Portal shell
-- [ ] Page skeleton: Tailwind CDN, header (site title + theme toggle button), footer, main content area.
-- [ ] Theme system: read `localStorage.theme` (fallback to `prefers-color-scheme`), apply before first paint, toggle button flips + persists it.
-- [ ] Tool registry: a plain JS array of tool metadata (see Data model) — the single source of truth the gallery renders from.
-- [ ] Gallery view: responsive card grid rendered from the registry; each card links to `#/tool/<id>`.
-- [ ] Tool view + hash router: listens for `hashchange`, shows the matching tool's `<section>` and hides the gallery (and vice versa for `#/` or empty hash), plus a "Back to tools" control.
+### Phase 0 — Portal shell ✅ done
+- [x] Page skeleton: Tailwind CDN, header (site title + theme toggle button), footer, main content area.
+- [x] Theme system: read `localStorage.theme` (fallback to `prefers-color-scheme`), apply before first paint, toggle button flips + persists it.
+- [x] Tool registry: a plain JS array of tool metadata (see Data model) — the single source of truth the gallery renders from.
+- [x] Gallery view: responsive card grid rendered from the registry; each card links to `#/tool/<id>`.
+- [x] Tool view + hash router: listens for `hashchange`, shows the matching tool's panel and hides the gallery (and vice versa for `#/` or empty hash), plus a "Back to tools" control.
 
-### Phase 1 — First two tools (proves the pattern)
-**Tool choice is a placeholder pending your confirmation** — swap freely before building:
-- [ ] Tool A: **Color Converter** — HEX ⇄ RGB ⇄ HSL with a live swatch preview.
-- [ ] Tool B: **JSON Formatter & Validator** — paste JSON, pretty-print it, surface parse errors inline.
-- [ ] Each tool is a self-contained `<section id="tool-<id>">` plus an `init<Tool>()` function, registered in the tool registry, initialized lazily (only when first navigated to).
-- [ ] Confirms the registry → gallery → router → tool-section pattern works end-to-end with two real, unrelated tools before scaling up.
+### Phase 1 — First two tools (proves the pattern) ✅ done
+- [x] Tool A: **Color Converter** — HEX ⇄ RGB ⇄ HSL with a live swatch preview.
+- [x] Tool B: **JSON Formatter & Validator** — paste JSON, pretty-print it, surface parse errors inline.
+- [x] Each tool is a self-contained `init<Tool>(container)` function, registered in the tool registry, initialized lazily (only when first navigated to) and kept alive (not reset) when switching between tools.
+- [x] Confirms the registry → gallery → router → tool pattern works end-to-end with two real, unrelated tools before scaling up.
 
 ### Future phases (not yet planned)
 Adding tool #3+ should mean: append one registry entry + one `<section>` + one init function — no changes elsewhere. Once the collection grows enough to need it, consider search/filter/tags on the gallery (own phase, not scoped yet).
