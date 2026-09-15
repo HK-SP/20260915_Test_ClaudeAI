@@ -289,12 +289,333 @@
     format();
   }
 
+  // ---- Multi-Axis Machining Simulator tool -----------------------------
+  // Teaching tool: 4 axes (X, Y, Z linear + A rotary about the X axis).
+  // Position/orientation only — the block's shape never changes, only
+  // where it is and how it's rotated. Two schematic canvases:
+  //  - top view (X/Y): the block's apparent Y-width pulses as it spins,
+  //    since you're looking down at a rotating bar from above.
+  //  - end view (Y/Z, looking straight down the rotary axis): the block's
+  //    cross-section visibly rotates — the clearest "it's spinning" view.
+  function msParseProgram(text) {
+    const steps = [];
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.split(';')[0].trim();
+      if (!line) continue;
+      const cmdMatch = line.match(/^[Gg]0*([01])\b/);
+      if (!cmdMatch) continue;
+      const rapid = cmdMatch[1] === '0';
+      const target = {};
+      const wordRe = /([XYZAxyza])\s*(-?\d+(?:\.\d+)?)/g;
+      let m;
+      while ((m = wordRe.exec(line))) target[m[1].toLowerCase()] = Number(m[2]);
+      if (Object.keys(target).length > 0) steps.push({ rapid, target });
+    }
+    return steps;
+  }
+
+  function initMachiningSimulator(container) {
+    container.innerHTML = `
+      <div class="grid gap-6 lg:grid-cols-2">
+        <div class="space-y-2">
+          <p class="text-sm font-medium">Top view (X / Y)</p>
+          <canvas id="ms-top" width="360" height="240" class="w-full rounded-lg border border-gray-300 dark:border-gray-700"></canvas>
+        </div>
+        <div class="space-y-2">
+          <p class="text-sm font-medium">End view along X (Y / Z) — shows the A-axis rotation</p>
+          <canvas id="ms-side" width="360" height="240" class="w-full rounded-lg border border-gray-300 dark:border-gray-700"></canvas>
+        </div>
+      </div>
+
+      <div class="grid gap-6 mt-6 lg:grid-cols-2">
+        <div>
+          <p class="text-sm font-medium mb-3">Jog axes</p>
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between text-sm mb-1"><label for="ms-x">X (mm)</label><span id="ms-x-val">0.0</span></div>
+              <input id="ms-x" type="range" min="-60" max="60" step="0.5" value="0" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><label for="ms-y">Y (mm)</label><span id="ms-y-val">0.0</span></div>
+              <input id="ms-y" type="range" min="-40" max="40" step="0.5" value="0" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><label for="ms-z">Z (mm)</label><span id="ms-z-val">20.0</span></div>
+              <input id="ms-z" type="range" min="0" max="80" step="0.5" value="20" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><label for="ms-a">A (deg, rotary table)</label><span id="ms-a-val">0</span></div>
+              <input id="ms-a" type="range" min="0" max="360" step="1" value="0" class="w-full">
+            </div>
+          </div>
+        </div>
+        <div>
+          <p class="text-sm font-medium mb-2">G-code program</p>
+          <textarea id="ms-gcode" rows="6" spellcheck="false"
+            class="w-full font-mono text-sm rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2"></textarea>
+          <div class="flex flex-wrap items-center gap-2 mt-2">
+            <button id="ms-play" type="button" class="px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 text-sm">Play</button>
+            <button id="ms-pause" type="button" disabled
+              class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed">Pause</button>
+            <button id="ms-reset" type="button" class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-sm">Reset</button>
+            <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 ml-auto">
+              Speed
+              <input id="ms-speed" type="range" min="1" max="10" value="5" class="w-24">
+            </label>
+          </div>
+          <p id="ms-status" class="mt-2 text-sm text-gray-600 dark:text-gray-400">Idle.</p>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-500">Supports G0/G1 with X/Y/Z/A words and ; comments. Other codes are ignored. Position/orientation only — no material removal is simulated.</p>
+        </div>
+      </div>
+    `;
+
+    const topCanvas = container.querySelector('#ms-top');
+    const sideCanvas = container.querySelector('#ms-side');
+    const topCtx = topCanvas.getContext('2d');
+    const sideCtx = sideCanvas.getContext('2d');
+
+    const TABLE = { xMin: -60, xMax: 60, yMin: -40, yMax: 40, zMin: 0, zMax: 80 };
+    const BLOCK = { length: 40, crossW: 20, crossH: 12 }; // length along X; crossW/crossH = Y/Z extent at A=0
+    const ROTARY_Z = 20; // height of the rotary axis centerline above the table
+
+    const axis = { x: 0, y: 0, z: 20, a: 0 };
+
+    const xSlider = container.querySelector('#ms-x');
+    const ySlider = container.querySelector('#ms-y');
+    const zSlider = container.querySelector('#ms-z');
+    const aSlider = container.querySelector('#ms-a');
+    const xVal = container.querySelector('#ms-x-val');
+    const yVal = container.querySelector('#ms-y-val');
+    const zVal = container.querySelector('#ms-z-val');
+    const aVal = container.querySelector('#ms-a-val');
+
+    function isDark() { return document.documentElement.classList.contains('dark'); }
+
+    function mapTop(x, y) {
+      return [
+        ((x - TABLE.xMin) / (TABLE.xMax - TABLE.xMin)) * topCanvas.width,
+        topCanvas.height - ((y - TABLE.yMin) / (TABLE.yMax - TABLE.yMin)) * topCanvas.height,
+      ];
+    }
+    const scaleTopX = mm => (mm / (TABLE.xMax - TABLE.xMin)) * topCanvas.width;
+    const scaleTopY = mm => (mm / (TABLE.yMax - TABLE.yMin)) * topCanvas.height;
+
+    function mapSide(y, z) {
+      return [
+        ((y - TABLE.yMin) / (TABLE.yMax - TABLE.yMin)) * sideCanvas.width,
+        sideCanvas.height - ((z - TABLE.zMin) / (TABLE.zMax - TABLE.zMin)) * sideCanvas.height,
+      ];
+    }
+    const scaleSideY = mm => (mm / (TABLE.yMax - TABLE.yMin)) * sideCanvas.width;
+    const scaleSideZ = mm => (mm / (TABLE.zMax - TABLE.zMin)) * sideCanvas.height;
+
+    function drawTop() {
+      const ctx = topCtx, w = topCanvas.width, h = topCanvas.height, dark = isDark();
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = dark ? '#111827' : '#f9fafb';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = dark ? '#374151' : '#d1d5db';
+      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+      const [ox, oy] = mapTop(0, 0);
+      ctx.strokeStyle = dark ? '#1f2937' : '#e5e7eb';
+      ctx.beginPath();
+      ctx.moveTo(ox, 0); ctx.lineTo(ox, h);
+      ctx.moveTo(0, oy); ctx.lineTo(w, oy);
+      ctx.stroke();
+
+      const rad = (axis.a * Math.PI) / 180;
+      const apparentHalfW = (BLOCK.crossW / 2) * Math.abs(Math.cos(rad)) + (BLOCK.crossH / 2) * Math.abs(Math.sin(rad));
+      const [bx, by] = mapTop(-BLOCK.length / 2, apparentHalfW);
+      ctx.fillStyle = dark ? '#4b5563' : '#9ca3af';
+      ctx.fillRect(bx, by, scaleTopX(BLOCK.length), scaleTopY(apparentHalfW * 2));
+      ctx.strokeStyle = dark ? '#1f2937' : '#4b5563';
+      ctx.strokeRect(bx, by, scaleTopX(BLOCK.length), scaleTopY(apparentHalfW * 2));
+
+      const [tx, ty] = mapTop(axis.x, axis.y);
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.fill();
+
+      ctx.fillStyle = dark ? '#9ca3af' : '#6b7280';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('X →', w - 28, h - 6);
+      ctx.fillText('↑ Y', 6, 14);
+    }
+
+    function drawSide() {
+      const ctx = sideCtx, w = sideCanvas.width, h = sideCanvas.height, dark = isDark();
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = dark ? '#111827' : '#f9fafb';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = dark ? '#374151' : '#d1d5db';
+      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+      const [, tableY] = mapSide(0, TABLE.zMin);
+      ctx.strokeStyle = dark ? '#4b5563' : '#9ca3af';
+      ctx.beginPath(); ctx.moveTo(0, tableY); ctx.lineTo(w, tableY); ctx.stroke();
+
+      const [cx, cy] = mapSide(0, ROTARY_Z);
+      const rad = (axis.a * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-rad);
+      const rw = scaleSideY(BLOCK.crossW), rh = scaleSideZ(BLOCK.crossH);
+      ctx.fillStyle = dark ? '#4b5563' : '#9ca3af';
+      ctx.fillRect(-rw / 2, -rh / 2, rw, rh);
+      ctx.strokeStyle = dark ? '#1f2937' : '#4b5563';
+      ctx.strokeRect(-rw / 2, -rh / 2, rw, rh);
+      ctx.restore();
+
+      ctx.strokeStyle = dark ? '#6b7280' : '#9ca3af';
+      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.stroke();
+
+      const [ty, tz] = mapSide(axis.y, axis.z);
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath(); ctx.arc(ty, tz, 5, 0, Math.PI * 2); ctx.fill();
+
+      ctx.fillStyle = dark ? '#9ca3af' : '#6b7280';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('Y →', w - 28, h - 6);
+      ctx.fillText('↑ Z', 6, 14);
+    }
+
+    function updateReadouts() {
+      xVal.textContent = axis.x.toFixed(1);
+      yVal.textContent = axis.y.toFixed(1);
+      zVal.textContent = axis.z.toFixed(1);
+      aVal.textContent = Math.round(((axis.a % 360) + 360) % 360);
+    }
+
+    function redraw() {
+      drawTop();
+      drawSide();
+      updateReadouts();
+    }
+
+    function syncSlidersFromAxis() {
+      xSlider.value = axis.x;
+      ySlider.value = axis.y;
+      zSlider.value = axis.z;
+      aSlider.value = ((axis.a % 360) + 360) % 360;
+    }
+
+    window.addEventListener('themechange', redraw);
+
+    // ---- Jog controls ---
+    xSlider.addEventListener('input', () => { stopPlayback(); axis.x = Number(xSlider.value); redraw(); });
+    ySlider.addEventListener('input', () => { stopPlayback(); axis.y = Number(ySlider.value); redraw(); });
+    zSlider.addEventListener('input', () => { stopPlayback(); axis.z = Number(zSlider.value); redraw(); });
+    aSlider.addEventListener('input', () => { stopPlayback(); axis.a = Number(aSlider.value); redraw(); });
+
+    // ---- G-code playback ---
+    const gcodeInput = container.querySelector('#ms-gcode');
+    const playBtn = container.querySelector('#ms-play');
+    const pauseBtn = container.querySelector('#ms-pause');
+    const resetBtn = container.querySelector('#ms-reset');
+    const speedSlider = container.querySelector('#ms-speed');
+    const statusEl = container.querySelector('#ms-status');
+
+    gcodeInput.value = [
+      '; Sample 4-axis program',
+      'G0 X0 Y0 Z20 A0',
+      'G1 X20 Y10 Z5 A0',
+      'G1 X20 Y10 Z5 A90',
+      'G1 X-15 Y-10 Z8 A180',
+      'G0 X0 Y0 Z20 A360',
+    ].join('\n');
+
+    let playState = null; // { steps, index, raf }
+
+    function stopPlayback() {
+      if (playState && playState.raf) cancelAnimationFrame(playState.raf);
+      playState = null;
+      playBtn.disabled = false;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = 'Pause';
+    }
+
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    function runStep() {
+      if (!playState) return;
+      if (playState.index >= playState.steps.length) {
+        statusEl.textContent = 'Done.';
+        stopPlayback();
+        return;
+      }
+      const step = playState.steps[playState.index];
+      const from = { ...axis };
+      const to = { ...axis, ...step.target };
+      const dist = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z, (to.a - from.a) * 0.3);
+      const speedFactor = Number(speedSlider.value);
+      const duration = step.rapid ? 200 : Math.max(200, (dist / speedFactor) * 120);
+      const startTime = performance.now();
+
+      statusEl.textContent = `Running line ${playState.index + 1} of ${playState.steps.length} (${step.rapid ? 'G0 rapid' : 'G1 feed'})`;
+
+      function frame(now) {
+        if (!playState) return;
+        const t = Math.min(1, (now - startTime) / duration);
+        axis.x = lerp(from.x, to.x, t);
+        axis.y = lerp(from.y, to.y, t);
+        axis.z = lerp(from.z, to.z, t);
+        axis.a = lerp(from.a, to.a, t);
+        syncSlidersFromAxis();
+        redraw();
+        if (t < 1) {
+          playState.raf = requestAnimationFrame(frame);
+        } else {
+          playState.index += 1;
+          runStep();
+        }
+      }
+      playState.raf = requestAnimationFrame(frame);
+    }
+
+    playBtn.addEventListener('click', () => {
+      const steps = msParseProgram(gcodeInput.value);
+      if (steps.length === 0) {
+        statusEl.textContent = 'No G0/G1 moves found in the program.';
+        return;
+      }
+      stopPlayback();
+      playState = { steps, index: 0, raf: null };
+      playBtn.disabled = true;
+      pauseBtn.disabled = false;
+      runStep();
+    });
+
+    pauseBtn.addEventListener('click', () => {
+      if (!playState) return;
+      if (playState.raf) {
+        cancelAnimationFrame(playState.raf);
+        playState.raf = null;
+        pauseBtn.textContent = 'Resume';
+        statusEl.textContent = 'Paused.';
+      } else {
+        pauseBtn.textContent = 'Pause';
+        runStep();
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      stopPlayback();
+      axis.x = 0; axis.y = 0; axis.z = 20; axis.a = 0;
+      syncSlidersFromAxis();
+      redraw();
+      statusEl.textContent = 'Idle.';
+    });
+
+    redraw();
+  }
+
   // ---- Tool registry ---------------------------------------------------
   // Single source of truth the gallery renders from. Adding a tool later
   // means: one entry here + one init function above.
   const TOOLS = [
     { id: 'color-converter', title: 'Color Converter', description: 'Convert colors between HEX, RGB, and HSL with a live preview.', init: initColorConverter },
     { id: 'json-formatter', title: 'JSON Formatter & Validator', description: 'Paste JSON to pretty-print it and catch syntax errors.', init: initJsonFormatter },
+    { id: 'machining-simulator', title: 'Multi-Axis Machining Simulator', description: 'Jog X/Y/Z/A axes or play back G-code to see 4-axis tool motion in a top and end view.', init: initMachiningSimulator },
   ];
 
   // ---- Theme -------------------------------------------------------------
@@ -309,6 +630,7 @@
     const isDark = document.documentElement.classList.toggle('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
     syncThemeIcon();
+    window.dispatchEvent(new Event('themechange'));
   });
 
   syncThemeIcon();
