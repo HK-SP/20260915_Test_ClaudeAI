@@ -45,26 +45,40 @@ Guidance for Claude Code (and other agents) working in this repository.
 - [x] Each tool is a self-contained `init<Tool>(container)` function, registered in the tool registry, initialized lazily (only when first navigated to) and kept alive (not reset) when switching between tools.
 - [x] Confirms the registry → gallery → router → tool pattern works end-to-end with two real, unrelated tools before scaling up.
 
+### Phase 2 — Multi-axis machining simulator (tool #3, learning artifact)
+Confirmed scope from interview: 4-axis (not full 5-axis), position/orientation teaching tool (no material removal), 2D schematic (not 3D), both manual jog and G-code playback as input.
+- [ ] Register as a third tool in `TOOLS` (e.g. `id: 'machining-simulator'`) — proves the registry pattern still needs zero shell changes at tool #3.
+- [ ] Model: linear **X, Y, Z** + rotary **A** (degrees), a rectangular block mounted on the A-axis rotary table.
+- [ ] Two `<canvas>` schematic views, redrawn on every axis-state change: **top view** (X/Y plane + block rotation from A) and **side view** (Z height, rotary axis edge-on). No material removal — the block outline never changes shape, only its position/orientation.
+- [ ] Manual jog controls: one slider/stepper per axis (X, Y, Z, A); moving one updates axis state and both views immediately.
+- [ ] G-code playback: textarea for a simple program (`G0`/`G1` moves with `X`/`Y`/`Z`/`A` words, `;` comments, one command per line), parsed into a move list; Play/Pause/Reset animates through it at an adjustable speed. Arcs (`G2`/`G3`) and feed-rate-based timing are out of scope for this phase.
+- [ ] Jogging and G-code playback drive the *same* axis-state object, so the two input modes never fall out of sync with what's drawn.
+
 ### Future phases (not yet planned)
-Adding tool #3+ should mean: append one registry entry + one `<section>` + one init function — no changes elsewhere. Once the collection grows enough to need it, consider search/filter/tags on the gallery (own phase, not scoped yet).
+Adding tool #4+ should mean: append one registry entry + one init function — no changes elsewhere. Once the collection grows enough to need it, consider search/filter/tags on the gallery (own phase, not scoped yet).
 
 ### Data model
 ```js
 // Single source of truth for the gallery — grows by one entry per new tool.
 const TOOLS = [
-  { id: 'color-converter', title: 'Color Converter', description: '...', tags: ['color', 'converter'] },
-  { id: 'json-formatter',  title: 'JSON Formatter & Validator', description: '...', tags: ['text', 'json'] },
+  { id: 'color-converter',      title: 'Color Converter', description: '...', tags: ['color', 'converter'] },
+  { id: 'json-formatter',       title: 'JSON Formatter & Validator', description: '...', tags: ['text', 'json'] },
+  { id: 'machining-simulator',  title: 'Multi-Axis Machining Simulator', description: '...', tags: ['cnc', 'learning'] },
 ];
 ```
 - **Theme state**: `localStorage['theme']` → `'light' | 'dark'`.
 - **Route state**: `location.hash` → `''` (gallery) or `'#/tool/<id>'`.
-- Both are the *only* persisted/shared state — no backend, no database, per the tech-stack constraint.
+- **Machining simulator axis state** (owned by that tool, not shared elsewhere): `{ x, y, z, a }` — the one place both the jog controls and the G-code player write to; every write triggers a redraw of both canvas views.
+- **Machining simulator G-code program**: parsed into a list of move steps `{ x?, y?, z?, a?, rapid }`; playback walks the list, animating axis state toward each target in turn.
+- All of the above is the *only* persisted/shared state — no backend, no database, per the tech-stack constraint (the axis/program state is in-memory only, not persisted across visits).
 
 ### Key flows
 1. **Load** → apply saved/preferred theme before paint → parse current hash → render gallery or the matching tool view.
 2. **Browse → open a tool** → click a card → hash changes to `#/tool/<id>` → router hides gallery, shows that tool's section, runs its init function once.
 3. **Toggle theme** → click button → flip light/dark → persist to `localStorage` → update the root element's theme attribute/class.
-4. **Grow the collection** (recurring, every future phase) → add a registry entry + a tool `<section>` + its init function → nothing else in the file needs to change.
+4. **Grow the collection** (recurring, every future phase) → add a registry entry + its init function → nothing else in the file needs to change.
+5. **Jog an axis** (machining simulator) → move a slider → axis state updates → both schematic views redraw immediately.
+6. **Run a G-code program** (machining simulator) → parse the textarea into move steps → Play animates axis state toward each step's target in turn → views stay in sync → Pause/Reset control playback.
 
 ## Writing Style
 
