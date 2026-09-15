@@ -10,6 +10,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@400;500;600&display=swap">
 
+<!-- Used only by the Multi-Axis Machining Simulator's 3D view. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
@@ -311,12 +315,9 @@
 
   // ---- Multi-Axis Machining Simulator tool -----------------------------
   // Teaching tool: 4 axes (X, Y, Z linear + A rotary about the X axis).
-  // Position/orientation only — the block's shape never changes, only
-  // where it is and how it's rotated. Two schematic canvases:
-  //  - top view (X/Y): the block's apparent Y-width pulses as it spins,
-  //    since you're looking down at a rotating bar from above.
-  //  - end view (Y/Z, looking straight down the rotary axis): the block's
-  //    cross-section visibly rotates — the clearest "it's spinning" view.
+  // Position/orientation only — the block's geometry never changes, only
+  // where it is and how it's rotated. Rendered as a real, rotatable 3D
+  // scene (Three.js + OrbitControls, loaded via CDN in <head>).
   function msParseProgram(text) {
     const steps = [];
     for (const rawLine of text.split('\n')) {
@@ -336,18 +337,12 @@
 
   function initMachiningSimulator(container) {
     container.innerHTML = `
-      <div class="grid gap-6 lg:grid-cols-2">
-        <div class="space-y-2">
-          <p class="text-sm font-medium">Top view (X / Y)</p>
-          <canvas id="ms-top" width="360" height="240" class="w-full rounded-lg border border-[oklch(90%_0.02_320)] dark:border-[oklch(35%_0.03_320)]"></canvas>
-        </div>
-        <div class="space-y-2">
-          <p class="text-sm font-medium">End view along X (Y / Z) — shows the A-axis rotation</p>
-          <canvas id="ms-side" width="360" height="240" class="w-full rounded-lg border border-[oklch(90%_0.02_320)] dark:border-[oklch(35%_0.03_320)]"></canvas>
-        </div>
+      <div class="space-y-2 mb-6">
+        <p class="text-sm font-medium">3D view — drag to orbit, scroll to zoom</p>
+        <div id="ms-viewport" class="w-full aspect-[16/10] rounded-lg border border-[oklch(90%_0.02_320)] dark:border-[oklch(35%_0.03_320)] overflow-hidden bg-[oklch(99%_0.006_95)] dark:bg-[oklch(26%_0.03_320)]"></div>
       </div>
 
-      <div class="grid gap-6 mt-6 lg:grid-cols-2">
+      <div class="grid gap-6 lg:grid-cols-2">
         <div>
           <p class="text-sm font-medium mb-3">Jog axes</p>
           <div class="space-y-3">
@@ -389,10 +384,7 @@
       </div>
     `;
 
-    const topCanvas = container.querySelector('#ms-top');
-    const sideCanvas = container.querySelector('#ms-side');
-    const topCtx = topCanvas.getContext('2d');
-    const sideCtx = sideCanvas.getContext('2d');
+    const viewport = container.querySelector('#ms-viewport');
 
     const TABLE = { xMin: -60, xMax: 60, yMin: -40, yMax: 40, zMin: 0, zMax: 80 };
     const BLOCK = { length: 40, crossW: 20, crossH: 12 }; // length along X; crossW/crossH = Y/Z extent at A=0
@@ -411,94 +403,6 @@
 
     function isDark() { return document.documentElement.classList.contains('dark'); }
 
-    function mapTop(x, y) {
-      return [
-        ((x - TABLE.xMin) / (TABLE.xMax - TABLE.xMin)) * topCanvas.width,
-        topCanvas.height - ((y - TABLE.yMin) / (TABLE.yMax - TABLE.yMin)) * topCanvas.height,
-      ];
-    }
-    const scaleTopX = mm => (mm / (TABLE.xMax - TABLE.xMin)) * topCanvas.width;
-    const scaleTopY = mm => (mm / (TABLE.yMax - TABLE.yMin)) * topCanvas.height;
-
-    function mapSide(y, z) {
-      return [
-        ((y - TABLE.yMin) / (TABLE.yMax - TABLE.yMin)) * sideCanvas.width,
-        sideCanvas.height - ((z - TABLE.zMin) / (TABLE.zMax - TABLE.zMin)) * sideCanvas.height,
-      ];
-    }
-    const scaleSideY = mm => (mm / (TABLE.yMax - TABLE.yMin)) * sideCanvas.width;
-    const scaleSideZ = mm => (mm / (TABLE.zMax - TABLE.zMin)) * sideCanvas.height;
-
-    function drawTop() {
-      const ctx = topCtx, w = topCanvas.width, h = topCanvas.height, dark = isDark();
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = dark ? 'oklch(26% 0.03 320)' : 'oklch(99% 0.006 95)';
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = dark ? 'oklch(35% 0.03 320)' : 'oklch(90% 0.02 320)';
-      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-
-      const [ox, oy] = mapTop(0, 0);
-      ctx.strokeStyle = dark ? 'oklch(32% 0.03 320)' : 'oklch(93% 0.01 320)';
-      ctx.beginPath();
-      ctx.moveTo(ox, 0); ctx.lineTo(ox, h);
-      ctx.moveTo(0, oy); ctx.lineTo(w, oy);
-      ctx.stroke();
-
-      const rad = (axis.a * Math.PI) / 180;
-      const apparentHalfW = (BLOCK.crossW / 2) * Math.abs(Math.cos(rad)) + (BLOCK.crossH / 2) * Math.abs(Math.sin(rad));
-      const [bx, by] = mapTop(-BLOCK.length / 2, apparentHalfW);
-      ctx.fillStyle = dark ? 'oklch(45% 0.02 320)' : 'oklch(75% 0.02 320)';
-      ctx.fillRect(bx, by, scaleTopX(BLOCK.length), scaleTopY(apparentHalfW * 2));
-      ctx.strokeStyle = dark ? 'oklch(20% 0.02 320)' : 'oklch(45% 0.03 320)';
-      ctx.strokeRect(bx, by, scaleTopX(BLOCK.length), scaleTopY(apparentHalfW * 2));
-
-      const [tx, ty] = mapTop(axis.x, axis.y);
-      ctx.fillStyle = 'oklch(68% 0.19 30)';
-      ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.fill();
-
-      ctx.fillStyle = dark ? 'oklch(70% 0.02 320)' : 'oklch(45% 0.02 320)';
-      ctx.font = "11px 'Work Sans', sans-serif";
-      ctx.fillText('X →', w - 28, h - 6);
-      ctx.fillText('↑ Y', 6, 14);
-    }
-
-    function drawSide() {
-      const ctx = sideCtx, w = sideCanvas.width, h = sideCanvas.height, dark = isDark();
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = dark ? 'oklch(26% 0.03 320)' : 'oklch(99% 0.006 95)';
-      ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = dark ? 'oklch(35% 0.03 320)' : 'oklch(90% 0.02 320)';
-      ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
-
-      const [, tableY] = mapSide(0, TABLE.zMin);
-      ctx.strokeStyle = dark ? 'oklch(55% 0.02 320)' : 'oklch(60% 0.02 320)';
-      ctx.beginPath(); ctx.moveTo(0, tableY); ctx.lineTo(w, tableY); ctx.stroke();
-
-      const [cx, cy] = mapSide(0, ROTARY_Z);
-      const rad = (axis.a * Math.PI) / 180;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(-rad);
-      const rw = scaleSideY(BLOCK.crossW), rh = scaleSideZ(BLOCK.crossH);
-      ctx.fillStyle = dark ? 'oklch(45% 0.02 320)' : 'oklch(75% 0.02 320)';
-      ctx.fillRect(-rw / 2, -rh / 2, rw, rh);
-      ctx.strokeStyle = dark ? 'oklch(20% 0.02 320)' : 'oklch(45% 0.03 320)';
-      ctx.strokeRect(-rw / 2, -rh / 2, rw, rh);
-      ctx.restore();
-
-      ctx.strokeStyle = dark ? 'oklch(55% 0.02 320)' : 'oklch(60% 0.02 320)';
-      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.stroke();
-
-      const [ty, tz] = mapSide(axis.y, axis.z);
-      ctx.fillStyle = 'oklch(68% 0.19 30)';
-      ctx.beginPath(); ctx.arc(ty, tz, 5, 0, Math.PI * 2); ctx.fill();
-
-      ctx.fillStyle = dark ? 'oklch(70% 0.02 320)' : 'oklch(45% 0.02 320)';
-      ctx.font = "11px 'Work Sans', sans-serif";
-      ctx.fillText('Y →', w - 28, h - 6);
-      ctx.fillText('↑ Z', 6, 14);
-    }
-
     function updateReadouts() {
       xVal.textContent = axis.x.toFixed(1);
       yVal.textContent = axis.y.toFixed(1);
@@ -506,10 +410,101 @@
       aVal.textContent = Math.round(((axis.a % 360) + 360) % 360);
     }
 
-    function redraw() {
-      drawTop();
-      drawSide();
-      updateReadouts();
+    if (typeof THREE === 'undefined') {
+      viewport.innerHTML = '<p class="w-full h-full flex items-center justify-center text-center text-sm px-6 text-[oklch(45%_0.03_320)] dark:text-[oklch(70%_0.02_320)]">3D view unavailable — the Three.js library could not be loaded (check your internet connection).</p>';
+      // Jog readouts still work without the 3D view; there's nothing to render, so redraw() only updates them.
+      window.addEventListener('themechange', () => {});
+      var redraw = updateReadouts;
+    } else {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.1, 1000);
+      camera.position.set(95, 90, 130);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio || 1);
+      renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+      viewport.appendChild(renderer.domElement);
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, ROTARY_Z, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.update();
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+      dirLight.position.set(60, 120, 80);
+      scene.add(dirLight);
+
+      const tableMat = new THREE.MeshStandardMaterial();
+      const tableMesh = new THREE.Mesh(new THREE.BoxGeometry(TABLE.xMax - TABLE.xMin, 4, TABLE.yMax - TABLE.yMin), tableMat);
+      tableMesh.position.set(0, -2, 0); // top surface sits at y = 0 (machine Z = 0)
+      scene.add(tableMesh);
+
+      const grid = new THREE.GridHelper(Math.max(TABLE.xMax - TABLE.xMin, TABLE.yMax - TABLE.yMin), 12);
+      grid.position.y = 0.01;
+      scene.add(grid);
+
+      // Static guide showing the rotary axis centerline (does not itself rotate).
+      const shaftMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.35 });
+      const shaftGeo = new THREE.CylinderGeometry(2, 2, TABLE.xMax - TABLE.xMin + 10, 16);
+      shaftGeo.rotateZ(Math.PI / 2); // cylinder default axis is Y; rotate onto X
+      const shaftMesh = new THREE.Mesh(shaftGeo, shaftMat);
+      shaftMesh.position.set(0, ROTARY_Z, 0);
+      scene.add(shaftMesh);
+
+      // The rotary workpiece: rotates about the (world) X axis by the A-axis angle.
+      const blockMat = new THREE.MeshStandardMaterial();
+      const blockMesh = new THREE.Mesh(new THREE.BoxGeometry(BLOCK.length, BLOCK.crossH, BLOCK.crossW), blockMat);
+      blockMesh.position.set(0, ROTARY_Z, 0);
+      scene.add(blockMesh);
+
+      // The tool: a cone tip on a short shaft, positioned at machine (X, Y, Z).
+      const toolGroup = new THREE.Group();
+      const toolMat = new THREE.MeshStandardMaterial({ color: 0xf0704a });
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(3, 8, 24), toolMat);
+      tip.position.y = -4;
+      const shank = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 14, 16), toolMat);
+      shank.position.y = 7;
+      toolGroup.add(tip, shank);
+      scene.add(toolGroup);
+
+      function applyTheme() {
+        const dark = isDark();
+        scene.background = new THREE.Color(dark ? 0x24212b : 0xf5f0e3);
+        tableMat.color.set(dark ? 0x3a3542 : 0xede6d8);
+        blockMat.color.set(dark ? 0x6e6878 : 0xbfbac2);
+        shaftMat.color.set(dark ? 0xf2ecdd : 0x3b3242);
+      }
+      applyTheme();
+      window.addEventListener('themechange', applyTheme);
+
+      window.addEventListener('resize', () => {
+        if (!viewport.clientWidth || !viewport.clientHeight) return;
+        renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+        camera.aspect = viewport.clientWidth / viewport.clientHeight;
+        camera.updateProjectionMatrix();
+      });
+
+      // machine (x, y, z, a) -> scene: X stays X, machine Z (height) becomes
+      // scene Y (up), machine Y becomes scene -Z; A rotates the block about X.
+      function applyAxisToScene() {
+        blockMesh.rotation.x = (axis.a * Math.PI) / 180;
+        toolGroup.position.set(axis.x, axis.z, -axis.y);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      var redraw = function () {
+        applyAxisToScene();
+        updateReadouts();
+      };
+      redraw();
+      animate();
     }
 
     function syncSlidersFromAxis() {
@@ -650,7 +645,7 @@
     },
     {
       id: 'machining-simulator', title: 'Multi-Axis Machining Simulator',
-      description: 'Jog X/Y/Z/A axes or play back G-code to see 4-axis tool motion in a top and end view.',
+      description: 'Jog X/Y/Z/A axes or play back G-code to see 4-axis tool motion in an orbitable 3D view.',
       accent: 'ink',
       icon: '<circle cx="12" cy="12" r="7"/><path d="M12 5v3M12 16v3M5 12h3M16 12h3"/>',
       init: initMachiningSimulator,

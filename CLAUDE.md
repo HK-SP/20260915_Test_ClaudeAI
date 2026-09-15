@@ -46,13 +46,13 @@ Guidance for Claude Code (and other agents) working in this repository.
 - [x] Confirms the registry → gallery → router → tool pattern works end-to-end with two real, unrelated tools before scaling up.
 
 ### Phase 2 — Multi-axis machining simulator (tool #3, learning artifact) ✅ done
-Confirmed scope from interview: 4-axis (not full 5-axis), position/orientation teaching tool (no material removal), 2D schematic (not 3D), both manual jog and G-code playback as input.
+Confirmed scope from interview: 4-axis (not full 5-axis), position/orientation teaching tool (no material removal), both manual jog and G-code playback as input. Visualization was revised after the first build: originally a 2D top+end schematic (two `<canvas>` views), **changed to a real, rotatable 3D scene** (single viewport, orbit/zoom via mouse) using Three.js loaded via CDN — still allowed under the tech-stack constraint (external JS libraries via CDN are fine; Three.js is a rendering library, not an app framework).
 - [x] Register as a third tool in `TOOLS` (`id: 'machining-simulator'`) — confirmed the registry pattern needs zero shell changes at tool #3.
 - [x] Model: linear **X, Y, Z** + rotary **A** (degrees, about the X axis), a rectangular block mounted on the A-axis rotary table.
-- [x] Two `<canvas>` schematic views, redrawn on every axis-state change: **top view** (X/Y, block's apparent Y-width pulses as it spins) and **end view** (Y/Z, looking down the rotary axis — the block visibly rotates). No material removal — the block outline never changes shape, only its position/orientation.
-- [x] Manual jog controls: one slider per axis (X, Y, Z, A); moving one updates axis state and both views immediately.
+- [x] One 3D `<canvas>` viewport (Three.js + OrbitControls, via CDN), re-rendered continuously: table, a static rotary-axis shaft guide, the block (rotates about X by `A`), and a cone-shaped tool marker at `(X, Y, Z)`. No material removal — the block geometry never changes, only its position/orientation. Degrades to an error message in the viewport if the Three.js CDN fails to load (e.g. no internet), rather than crashing the rest of the tool.
+- [x] Manual jog controls: one slider per axis (X, Y, Z, A); moving one updates axis state, which the render loop picks up immediately.
 - [x] G-code playback: textarea for a simple program (`G0`/`G1` moves with `X`/`Y`/`Z`/`A` words, `;` comments), parsed into a move list; Play/Pause/Reset animates through it at an adjustable speed. A is tracked continuously (not wrapped) so e.g. `A0` → `A360` plays as a full turn. Arcs (`G2`/`G3`) and feed-rate-based timing are out of scope for this phase.
-- [x] Jogging and G-code playback drive the *same* axis-state object, so the two input modes never fall out of sync with what's drawn.
+- [x] Jogging and G-code playback drive the *same* axis-state object, so the two input modes never fall out of sync with what's rendered.
 
 ### Future phases (not yet planned)
 Adding tool #4+ should mean: append one registry entry + one init function — no changes elsewhere. Once the collection grows enough to need it, consider search/filter/tags on the gallery (own phase, not scoped yet).
@@ -68,7 +68,7 @@ const TOOLS = [
 ```
 - **Theme state**: `localStorage['theme']` → `'light' | 'dark'`.
 - **Route state**: `location.hash` → `''` (gallery) or `'#/tool/<id>'`.
-- **Machining simulator axis state** (owned by that tool, not shared elsewhere): `{ x, y, z, a }` — the one place both the jog controls and the G-code player write to; every write triggers a redraw of both canvas views.
+- **Machining simulator axis state** (owned by that tool, not shared elsewhere): `{ x, y, z, a }` — the one place both the jog controls and the G-code player write to; the Three.js render loop reads it every frame to position the block/tool.
 - **Machining simulator G-code program**: parsed into a list of move steps `{ x?, y?, z?, a?, rapid }`; playback walks the list, animating axis state toward each target in turn.
 - All of the above is the *only* persisted/shared state — no backend, no database, per the tech-stack constraint (the axis/program state is in-memory only, not persisted across visits).
 
@@ -77,8 +77,8 @@ const TOOLS = [
 2. **Browse → open a tool** → click a card → hash changes to `#/tool/<id>` → router hides gallery, shows that tool's section, runs its init function once.
 3. **Toggle theme** → click button → flip light/dark → persist to `localStorage` → update the root element's theme attribute/class.
 4. **Grow the collection** (recurring, every future phase) → add a registry entry + its init function → nothing else in the file needs to change.
-5. **Jog an axis** (machining simulator) → move a slider → axis state updates → both schematic views redraw immediately.
-6. **Run a G-code program** (machining simulator) → parse the textarea into move steps → Play animates axis state toward each step's target in turn → views stay in sync → Pause/Reset control playback.
+5. **Jog an axis** (machining simulator) → move a slider → axis state updates → the block/tool's 3D position updates on the next rendered frame.
+6. **Run a G-code program** (machining simulator) → parse the textarea into move steps → Play animates axis state toward each step's target in turn → the 3D scene stays in sync → Pause/Reset control playback.
 
 ## Writing Style
 
