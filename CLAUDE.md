@@ -18,3 +18,7 @@ Guidance for Claude Code (and other agents) working in this repository.
 - CSS and JS must be inlined in `<style>`/`<script>` tags, not split into separate `.css`/`.js` files.
 - Linking external images and external CSS/JavaScript libraries (e.g. via `<link>`/`<script src>` to a CDN) is allowed.
 - This is so the finished project can be copy-pasted as a single file for sharing in class and on single-file code platforms.
+
+## Writing Style
+
+- Use a **bold lead-in** at the start of paragraphs where possible, to make paragraphs easier to scan and read.
