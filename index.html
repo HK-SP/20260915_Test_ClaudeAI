@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool Portal</title>
+<meta name="description" content="A growing collection of small web tools and learning artifacts.">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class' };
+</script>
+<script>
+  // Runs before first paint so there's no light/dark flash on load.
+  (function () {
+    const stored = localStorage.getItem('theme');
+    const dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+
+<style>
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body class="min-h-screen flex flex-col bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors">
+
+<header class="border-b border-gray-200 dark:border-gray-800">
+  <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+    <a href="#/" class="text-lg font-semibold tracking-tight">Tool Portal</a>
+    <button id="theme-toggle" type="button"
+      class="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+      aria-label="Toggle light and dark theme">
+      <span id="theme-toggle-icon">🌙</span>
+    </button>
+  </div>
+</header>
+
+<main id="app" class="flex-1">
+  <div class="max-w-5xl mx-auto px-4 py-10">
+
+    <section id="view-gallery">
+      <h1 class="text-2xl font-bold mb-1">Tools &amp; learning artifacts</h1>
+      <p class="text-gray-600 dark:text-gray-400 mb-8">
+        <strong>A growing collection</strong> of small, self-contained web tools — pick one below to try it out.
+      </p>
+      <div id="gallery-grid" class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <p id="gallery-empty" hidden class="text-gray-500 dark:text-gray-400 italic">
+        No tools yet — check back soon.
+      </p>
+    </section>
+
+    <section id="view-tool" hidden>
+      <button id="back-to-tools" type="button"
+        class="mb-6 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+        &larr; Back to tools
+      </button>
+      <h1 id="tool-title" class="text-2xl font-bold mb-1"></h1>
+      <p id="tool-description" class="text-gray-600 dark:text-gray-400 mb-8"></p>
+      <div id="tool-container"></div>
+      <p id="tool-not-found" hidden class="text-gray-500 dark:text-gray-400 italic">
+        That tool doesn't exist (yet).
+      </p>
+    </section>
+
+  </div>
+</main>
+
+<footer class="border-t border-gray-200 dark:border-gray-800">
+  <div class="max-w-5xl mx-auto px-4 py-6 text-sm text-gray-500 dark:text-gray-500">
+    More tools and lessons are added over time.
+  </div>
+</footer>
+
+<script>
+  // ---- Tool registry ---------------------------------------------------
+  // Single source of truth the gallery renders from. Adding a tool later
+  // means: one entry here + one <section> below + its init function.
+  const TOOLS = [
+    // Phase 1 will add real entries here, e.g.:
+    // { id: 'color-converter', title: 'Color Converter', description: '...', init: initColorConverter },
+  ];
+
+  // ---- Theme -------------------------------------------------------------
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeToggleIcon = document.getElementById('theme-toggle-icon');
+
+  function syncThemeIcon() {
+    themeToggleIcon.textContent = document.documentElement.classList.contains('dark') ? '☀️' : '🌙';
+  }
+
+  themeToggle.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    syncThemeIcon();
+  });
+
+  syncThemeIcon();
+
+  // ---- Gallery -------------------------------------------------------------
+  const galleryGrid = document.getElementById('gallery-grid');
+  const galleryEmpty = document.getElementById('gallery-empty');
+
+  function renderGallery() {
+    galleryGrid.innerHTML = '';
+
+    if (TOOLS.length === 0) {
+      galleryEmpty.hidden = false;
+      return;
+    }
+    galleryEmpty.hidden = true;
+
+    for (const tool of TOOLS) {
+      const card = document.createElement('a');
+      card.href = `#/tool/${tool.id}`;
+      card.className = 'block rounded-xl border border-gray-200 dark:border-gray-800 p-5 hover:border-gray-400 dark:hover:border-gray-600 hover:shadow-sm transition';
+      card.innerHTML = `
+        <h2 class="font-semibold mb-1">${tool.title}</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400">${tool.description}</p>
+      `;
+      galleryGrid.appendChild(card);
+    }
+  }
+
+  // ---- Router -------------------------------------------------------------
+  // Hash-based, so gallery vs. a given tool are both linkable/bookmarkable
+  // without needing separate pages.
+  const viewGallery = document.getElementById('view-gallery');
+  const viewTool = document.getElementById('view-tool');
+  const toolTitle = document.getElementById('tool-title');
+  const toolDescription = document.getElementById('tool-description');
+  const toolContainer = document.getElementById('tool-container');
+  const toolNotFound = document.getElementById('tool-not-found');
+  const initializedTools = new Set();
+
+  function parseRoute() {
+    const match = location.hash.match(/^#\/tool\/(.+)$/);
+    return match ? { view: 'tool', id: decodeURIComponent(match[1]) } : { view: 'gallery' };
+  }
+
+  function render() {
+    const route = parseRoute();
+
+    if (route.view === 'tool') {
+      const tool = TOOLS.find(t => t.id === route.id);
+
+      viewGallery.hidden = true;
+      viewTool.hidden = false;
+
+      if (!tool) {
+        toolTitle.textContent = '';
+        toolDescription.textContent = '';
+        toolContainer.innerHTML = '';
+        toolNotFound.hidden = false;
+        return;
+      }
+
+      toolNotFound.hidden = true;
+      toolTitle.textContent = tool.title;
+      toolDescription.textContent = tool.description;
+
+      if (!initializedTools.has(tool.id)) {
+        tool.init(toolContainer);
+        initializedTools.add(tool.id);
+      }
+    } else {
+      viewGallery.hidden = false;
+      viewTool.hidden = true;
+    }
+  }
+
+  document.getElementById('back-to-tools').addEventListener('click', () => {
+    location.hash = '';
+  });
+
+  window.addEventListener('hashchange', render);
+
+  renderGallery();
+  render();
+</script>
+
+</body>
+</html>
