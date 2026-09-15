@@ -45,14 +45,14 @@ Guidance for Claude Code (and other agents) working in this repository.
 - [x] Each tool is a self-contained `init<Tool>(container)` function, registered in the tool registry, initialized lazily (only when first navigated to) and kept alive (not reset) when switching between tools.
 - [x] Confirms the registry → gallery → router → tool pattern works end-to-end with two real, unrelated tools before scaling up.
 
-### Phase 2 — Multi-axis machining simulator (tool #3, learning artifact)
+### Phase 2 — Multi-axis machining simulator (tool #3, learning artifact) ✅ done
 Confirmed scope from interview: 4-axis (not full 5-axis), position/orientation teaching tool (no material removal), 2D schematic (not 3D), both manual jog and G-code playback as input.
-- [ ] Register as a third tool in `TOOLS` (e.g. `id: 'machining-simulator'`) — proves the registry pattern still needs zero shell changes at tool #3.
-- [ ] Model: linear **X, Y, Z** + rotary **A** (degrees), a rectangular block mounted on the A-axis rotary table.
-- [ ] Two `<canvas>` schematic views, redrawn on every axis-state change: **top view** (X/Y plane + block rotation from A) and **side view** (Z height, rotary axis edge-on). No material removal — the block outline never changes shape, only its position/orientation.
-- [ ] Manual jog controls: one slider/stepper per axis (X, Y, Z, A); moving one updates axis state and both views immediately.
-- [ ] G-code playback: textarea for a simple program (`G0`/`G1` moves with `X`/`Y`/`Z`/`A` words, `;` comments, one command per line), parsed into a move list; Play/Pause/Reset animates through it at an adjustable speed. Arcs (`G2`/`G3`) and feed-rate-based timing are out of scope for this phase.
-- [ ] Jogging and G-code playback drive the *same* axis-state object, so the two input modes never fall out of sync with what's drawn.
+- [x] Register as a third tool in `TOOLS` (`id: 'machining-simulator'`) — confirmed the registry pattern needs zero shell changes at tool #3.
+- [x] Model: linear **X, Y, Z** + rotary **A** (degrees, about the X axis), a rectangular block mounted on the A-axis rotary table.
+- [x] Two `<canvas>` schematic views, redrawn on every axis-state change: **top view** (X/Y, block's apparent Y-width pulses as it spins) and **end view** (Y/Z, looking down the rotary axis — the block visibly rotates). No material removal — the block outline never changes shape, only its position/orientation.
+- [x] Manual jog controls: one slider per axis (X, Y, Z, A); moving one updates axis state and both views immediately.
+- [x] G-code playback: textarea for a simple program (`G0`/`G1` moves with `X`/`Y`/`Z`/`A` words, `;` comments), parsed into a move list; Play/Pause/Reset animates through it at an adjustable speed. A is tracked continuously (not wrapped) so e.g. `A0` → `A360` plays as a full turn. Arcs (`G2`/`G3`) and feed-rate-based timing are out of scope for this phase.
+- [x] Jogging and G-code playback drive the *same* axis-state object, so the two input modes never fall out of sync with what's drawn.
 
 ### Future phases (not yet planned)
 Adding tool #4+ should mean: append one registry entry + one init function — no changes elsewhere. Once the collection grows enough to need it, consider search/filter/tags on the gallery (own phase, not scoped yet).
